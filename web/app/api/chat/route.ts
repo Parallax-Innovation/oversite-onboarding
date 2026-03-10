@@ -1,7 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
-
-const anthropic = new Anthropic();
 
 interface Progress {
   currentModule: number;
@@ -518,6 +515,9 @@ Adapt your pace to their understanding level.
 Remember: Your goal is for ${userName || "this engineer"} to DEEPLY UNDERSTAND the system, not just memorize facts.`;
 }
 
+// OpenRouter API with free models
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -528,20 +528,41 @@ export async function POST(request: NextRequest) {
 
     const systemPrompt = buildSystemPrompt(progress.userName, progress);
 
-    const anthropicMessages = messages.map((msg) => ({
-      role: msg.role as "user" | "assistant",
-      content: msg.content,
-    }));
+    // Format messages for OpenRouter (OpenAI-compatible)
+    const openRouterMessages = [
+      { role: "system", content: systemPrompt },
+      ...messages.map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+      })),
+    ];
 
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 8096,
-      system: systemPrompt,
-      messages: anthropicMessages,
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://oversite-onboarding.vercel.app",
+        "X-Title": "OverSite Training",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.0-flash-exp:free",
+        messages: openRouterMessages,
+        max_tokens: 4096,
+      }),
     });
 
-    const content =
-      response.content[0].type === "text" ? response.content[0].text : "";
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("OpenRouter API error:", errorText);
+      return NextResponse.json(
+        { error: "API request failed", details: errorText },
+        { status: response.status }
+      );
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "";
 
     return NextResponse.json({ content });
   } catch (error) {
