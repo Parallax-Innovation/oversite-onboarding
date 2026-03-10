@@ -1,0 +1,30 @@
+{
+  "name": "oversite-onboarding",
+  "version": "1.0.0",
+  "description": "AI-powered onboarding chatbot for OverSite engineers",
+  "main": "dist/index.js",
+  "bin": {
+    "oversite-onboard": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "keywords": [
+    "oversite",
+    "onboarding",
+    "ai",
+    "training"
+  ],
+  "author": "Parallax Innovation",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.74.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.7.0",
+    "typescript": "^5"
+  }
+}
