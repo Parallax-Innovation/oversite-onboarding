@@ -4,80 +4,140 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
+import * as os from "os";
 
 const anthropic = new Anthropic();
 
-// Load all knowledge base files
+// Progress tracking
+interface Progress {
+  currentModule: number;
+  currentLesson: number;
+  completed: string[];
+  quizScores: Record<string, number>;
+  startedAt: string;
+}
+
+const PROGRESS_DIR = path.join(os.homedir(), ".oversite-training");
+const PROGRESS_FILE = path.join(PROGRESS_DIR, "progress.json");
+
+function loadProgress(): Progress {
+  try {
+    if (fs.existsSync(PROGRESS_FILE)) {
+      return JSON.parse(fs.readFileSync(PROGRESS_FILE, "utf-8"));
+    }
+  } catch (e) {
+    // Ignore
+  }
+  return {
+    currentModule: 1,
+    currentLesson: 1,
+    completed: [],
+    quizScores: {},
+    startedAt: new Date().toISOString(),
+  };
+}
+
+function saveProgress(progress: Progress) {
+  if (!fs.existsSync(PROGRESS_DIR)) {
+    fs.mkdirSync(PROGRESS_DIR, { recursive: true });
+  }
+  fs.writeFileSync(PROGRESS_FILE, JSON.stringify(progress, null, 2));
+}
+
+// Load curriculum
+function loadCurriculum(): string {
+  const curriculumDir = path.join(__dirname, "..", "curriculum");
+  let content = "";
+
+  const walkDir = (dir: string) => {
+    if (!fs.existsSync(dir)) return;
+    const files = fs.readdirSync(dir);
+    for (const file of files.sort()) {
+      const filePath = path.join(dir, file);
+      const stat = fs.statSync(filePath);
+      if (stat.isDirectory()) {
+        walkDir(filePath);
+      } else if (file.endsWith(".md")) {
+        content += `\n\n---\n# FILE: ${file}\n\n`;
+        content += fs.readFileSync(filePath, "utf-8");
+      }
+    }
+  };
+
+  walkDir(curriculumDir);
+  return content;
+}
+
+// Load knowledge base
 function loadKnowledgeBase(): string {
   const kbDir = path.join(__dirname, "..", "knowledge-base");
-  const guidesDir = path.join(__dirname, "..", "guides");
+  let content = "";
 
-  let content = "# OVERSITE KNOWLEDGE BASE\n\n";
-
-  // Load knowledge base
   if (fs.existsSync(kbDir)) {
-    const kbFiles = fs.readdirSync(kbDir).filter((f) => f.endsWith(".md"));
-    for (const file of kbFiles) {
-      const filePath = path.join(kbDir, file);
-      content += `\n---\n## ${file}\n\n`;
-      content += fs.readFileSync(filePath, "utf-8");
-    }
-  }
-
-  // Load guides
-  if (fs.existsSync(guidesDir)) {
-    const guideFiles = fs.readdirSync(guidesDir).filter((f) => f.endsWith(".md"));
-    content += "\n\n# GUIDES\n";
-    for (const file of guideFiles) {
-      const filePath = path.join(guidesDir, file);
-      content += `\n---\n## ${file}\n\n`;
-      content += fs.readFileSync(filePath, "utf-8");
+    const files = fs.readdirSync(kbDir).filter((f) => f.endsWith(".md"));
+    for (const file of files) {
+      content += `\n\n---\n# ${file}\n\n`;
+      content += fs.readFileSync(path.join(kbDir, file), "utf-8");
     }
   }
 
   return content;
 }
 
-const SYSTEM_PROMPT = `You are the OverSite Onboarding Assistant. Your job is to train new engineers on the OverSite codebase so they can ship features independently.
+const SYSTEM_PROMPT = `You are the OverSite Training System. Your job is to guide engineers through a structured curriculum to learn the OverSite codebase.
 
+# CURRICULUM
+${loadCurriculum()}
+
+# KNOWLEDGE BASE
 ${loadKnowledgeBase()}
 
 # YOUR ROLE
 
-You are a patient, knowledgeable mentor who helps engineers understand:
-1. The overall architecture (4 layers: Perception, Action, Observation, Agent)
-2. How the iOS app, web app, and agent layer work together
-3. Key files and where to make changes
-4. Development rules and conventions
-5. Common workflows (deploying, adding features, etc.)
+You are a patient, structured instructor who:
+1. Follows the curriculum in order (Module 1 → Module 2 → etc.)
+2. Uses the visualizations provided (ASCII diagrams)
+3. Checks understanding with checkpoint questions
+4. Adapts pace based on the learner's responses
+5. Answers questions but gently guides back to the curriculum
 
-# TRAINING APPROACH
+# CURRENT SESSION
 
-- Start by understanding what the engineer already knows
-- Explain concepts from high-level to detailed
-- Use diagrams and code examples when helpful
-- Quiz the engineer to ensure understanding
-- Provide hands-on exercises when appropriate
-- Reference specific files and line numbers
+The learner's progress is tracked. When they say:
+- "next" → Move to the next lesson
+- "back" → Go to previous lesson
+- "progress" → Show current progress
+- "quiz" → Give the module quiz
+- "visualize X" → Show the relevant ASCII diagram
+- "files" → List key files for current topic
+- Any question → Answer it, then guide back to curriculum
 
-# INTERACTION STYLE
+# TEACHING STYLE
 
-- Be conversational but efficient
-- Break complex topics into digestible pieces
-- Validate understanding before moving on
-- Encourage questions
-- When explaining code, always reference the actual file paths
+1. **Start each lesson** by stating the learning objective
+2. **Use visualizations** - Always show ASCII diagrams when explaining architecture
+3. **Check understanding** - Ask checkpoint questions before moving on
+4. **Be encouraging** - Celebrate progress, normalize confusion
+5. **Stay structured** - Don't skip ahead unless asked
 
-# COMMON TRAINING PATHS
+# VISUALIZATION RULES
 
-1. **Quick Overview** (15 min): High-level architecture, key concepts
-2. **Web Development** (30 min): Dashboard, API routes, deployment
-3. **Agent Layer** (30 min): E2B, Claude Agent SDK, MCP tools
-4. **Full Deep Dive** (60+ min): Complete architecture walkthrough
+When explaining architecture, ALWAYS include ASCII diagrams. Use the ones from the curriculum or create similar ones. Visual learners need these.
 
-Ask the engineer which path they want, or adapt based on their questions.
+Example response when starting Module 1:
+"""
+# Module 1.1: What is OverSite?
 
-Remember: The goal is for the engineer to be able to ship features independently after this training.`;
+**Learning Objective:** Understand the problem OverSite solves and its high-level architecture.
+
+[Include the ASCII diagram from the curriculum]
+
+[Explain the concept]
+
+**Checkpoint:** Before we continue, can you tell me...
+"""
+
+Remember: Your goal is for this engineer to be able to ship features independently after completing the curriculum.`;
 
 interface Message {
   role: "user" | "assistant";
@@ -85,11 +145,36 @@ interface Message {
 }
 
 const conversationHistory: Message[] = [];
+let progress = loadProgress();
 
 async function chat(userMessage: string): Promise<string> {
+  // Handle special commands
+  const lower = userMessage.toLowerCase().trim();
+
+  if (lower === "progress") {
+    return formatProgress();
+  }
+
+  if (lower === "reset") {
+    progress = {
+      currentModule: 1,
+      currentLesson: 1,
+      completed: [],
+      quizScores: {},
+      startedAt: new Date().toISOString(),
+    };
+    saveProgress(progress);
+    return "Progress reset. Starting from Module 1.1.";
+  }
+
+  // Add context about current position
+  const contextMessage = `[SYSTEM: Learner is on Module ${progress.currentModule}, Lesson ${progress.currentLesson}. Completed: ${progress.completed.length} lessons. Command: "${userMessage}"]
+
+${userMessage}`;
+
   conversationHistory.push({
     role: "user",
-    content: userMessage,
+    content: contextMessage,
   });
 
   const response = await anthropic.messages.create({
@@ -107,7 +192,58 @@ async function chat(userMessage: string): Promise<string> {
     content: assistantMessage,
   });
 
+  // Update progress based on "next" command
+  if (lower === "next") {
+    const lessonKey = `${progress.currentModule}.${progress.currentLesson}`;
+    if (!progress.completed.includes(lessonKey)) {
+      progress.completed.push(lessonKey);
+    }
+    progress.currentLesson++;
+    // Simple module progression (3 lessons per module)
+    if (progress.currentLesson > 3) {
+      progress.currentModule++;
+      progress.currentLesson = 1;
+    }
+    saveProgress(progress);
+  }
+
+  if (lower === "back" && (progress.currentLesson > 1 || progress.currentModule > 1)) {
+    progress.currentLesson--;
+    if (progress.currentLesson < 1) {
+      progress.currentModule--;
+      progress.currentLesson = 3;
+    }
+    saveProgress(progress);
+  }
+
   return assistantMessage;
+}
+
+function formatProgress(): string {
+  const totalLessons = 18; // 6 modules × 3 lessons
+  const pct = Math.round((progress.completed.length / totalLessons) * 100);
+
+  return `
+╔════════════════════════════════════════════╗
+║           TRAINING PROGRESS                 ║
+╠════════════════════════════════════════════╣
+║                                            ║
+║  Current: Module ${progress.currentModule}, Lesson ${progress.currentLesson}             ║
+║  Completed: ${progress.completed.length}/${totalLessons} lessons (${pct}%)            ║
+║                                            ║
+║  [${"█".repeat(Math.floor(pct / 5))}${"░".repeat(20 - Math.floor(pct / 5))}]  ║
+║                                            ║
+║  Started: ${progress.startedAt.split("T")[0]}                    ║
+║                                            ║
+╚════════════════════════════════════════════╝
+
+Commands:
+  next     - Continue to next lesson
+  back     - Go to previous lesson
+  quiz     - Take module quiz
+  reset    - Start over
+  visualize [topic] - Show diagram
+`;
 }
 
 async function main() {
@@ -116,24 +252,33 @@ async function main() {
     output: process.stdout,
   });
 
-  console.log("\n===========================================");
-  console.log("  OVERSITE ONBOARDING ASSISTANT");
-  console.log("===========================================\n");
-  console.log("Welcome! I'm here to help you learn the OverSite codebase.");
-  console.log("Type 'quit' or 'exit' to end the session.\n");
+  console.log(`
+╔═══════════════════════════════════════════════════════════════╗
+║                                                               ║
+║     ██████╗ ██╗   ██╗███████╗██████╗ ███████╗██╗████████╗    ║
+║    ██╔═══██╗██║   ██║██╔════╝██╔══██╗██╔════╝██║╚══██╔══╝    ║
+║    ██║   ██║██║   ██║█████╗  ██████╔╝███████╗██║   ██║       ║
+║    ██║   ██║╚██╗ ██╔╝██╔══╝  ██╔══██╗╚════██║██║   ██║       ║
+║    ╚██████╔╝ ╚████╔╝ ███████╗██║  ██║███████║██║   ██║       ║
+║     ╚═════╝   ╚═══╝  ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝   ╚═╝       ║
+║                                                               ║
+║                   ENGINEER TRAINING SYSTEM                    ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
+`);
 
-  // Initial greeting
-  const greeting = await chat(
-    "Hi! I'm a new engineer joining the team. I need to learn the OverSite codebase so I can start shipping features."
-  );
-  console.log(`Assistant: ${greeting}\n`);
+  console.log(formatProgress());
+  console.log("\nType 'start' to begin or ask any question.\n");
 
   const prompt = () => {
     rl.question("You: ", async (input) => {
       const trimmed = input.trim();
 
-      if (trimmed.toLowerCase() === "quit" || trimmed.toLowerCase() === "exit") {
-        console.log("\nGoodbye! Happy coding!\n");
+      if (
+        trimmed.toLowerCase() === "quit" ||
+        trimmed.toLowerCase() === "exit"
+      ) {
+        console.log("\nProgress saved. See you next time!\n");
         rl.close();
         return;
       }
@@ -144,8 +289,9 @@ async function main() {
       }
 
       try {
+        console.log("\n");
         const response = await chat(trimmed);
-        console.log(`\nAssistant: ${response}\n`);
+        console.log(`${response}\n`);
       } catch (error) {
         console.error("Error:", error);
       }
