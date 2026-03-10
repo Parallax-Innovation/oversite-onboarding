@@ -546,7 +546,7 @@ export async function POST(request: NextRequest) {
         "X-Title": "OverSite Training",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.0-flash-exp:free",
+        model: "mistralai/mistral-small-3.1-24b-instruct:free",
         messages: openRouterMessages,
         max_tokens: 4096,
       }),
