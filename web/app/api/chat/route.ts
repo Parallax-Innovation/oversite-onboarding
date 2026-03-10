@@ -515,8 +515,41 @@ Adapt your pace to their understanding level.
 Remember: Your goal is for ${userName || "this engineer"} to DEEPLY UNDERSTAND the system, not just memorize facts.`;
 }
 
-// OpenRouter API with free models
+// OpenRouter API with free models - try multiple in case of rate limits
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+
+const FREE_MODELS = [
+  "qwen/qwen3-4b:free",
+  "google/gemma-3-4b-it:free",
+  "google/gemma-3-12b-it:free",
+  "nvidia/nemotron-nano-9b-v2:free",
+  "liquid/lfm-2.5-1.2b-instruct:free",
+];
+
+async function tryModel(model: string, messages: Array<{role: string; content: string}>) {
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://oversite-onboarding.vercel.app",
+      "X-Title": "OverSite Training",
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      max_tokens: 4096,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`${model}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || "";
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -537,34 +570,24 @@ export async function POST(request: NextRequest) {
       })),
     ];
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://oversite-onboarding.vercel.app",
-        "X-Title": "OverSite Training",
-      },
-      body: JSON.stringify({
-        model: "mistralai/mistral-small-3.1-24b-instruct:free",
-        messages: openRouterMessages,
-        max_tokens: 4096,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("OpenRouter API error:", errorText);
-      return NextResponse.json(
-        { error: "API request failed", details: errorText },
-        { status: response.status }
-      );
+    // Try each model until one works
+    let lastError = "";
+    for (const model of FREE_MODELS) {
+      try {
+        console.log(`Trying model: ${model}`);
+        const content = await tryModel(model, openRouterMessages);
+        return NextResponse.json({ content });
+      } catch (error) {
+        lastError = String(error);
+        console.error(`Model ${model} failed:`, error);
+        continue;
+      }
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || "";
-
-    return NextResponse.json({ content });
+    return NextResponse.json(
+      { error: "All models failed", details: lastError },
+      { status: 503 }
+    );
   } catch (error) {
     console.error("Chat API error:", error);
     return NextResponse.json(
